@@ -741,19 +741,19 @@ footer{
   </div>
   <div class="admin-body">
     <div class="admin-tab-btns">
-      <button class="admin-tab-btn active" onclick="switchAdminTab('memories',this)">📸 Memories</button>
-      <button class="admin-tab-btn" onclick="switchAdminTab('gallery',this)">🖼️ Gallery</button>
+      <button class="admin-tab-btn active" onclick="switchAdminTab('mem',this)">📸 Memories</button>
+      <button class="admin-tab-btn" onclick="switchAdminTab('gal',this)">🖼️ Gallery</button>
     </div>
 
     <!-- MEMORIES TAB -->
     <div id="adminMemoriesTab">
       <div class="admin-section-title"><span>📸</span> Memories Section Photos</div>
-      <div class="upload-zone" id="memoriesUploadZone" onclick="document.getElementById('memoriesFileInput').click()" ondragover="adminDragOver(event,'memoriesUploadZone')" ondragleave="adminDragLeave('memoriesUploadZone')" ondrop="adminDrop(event,'memories')">
+      <div class="upload-zone" id="memoriesUploadZone" onclick="document.getElementById('memoriesFileInput').click()" ondragover="adminDragOver(event,'memoriesUploadZone')" ondragleave="adminDragLeave('memoriesUploadZone')" ondrop="adminDrop(event,'mem')">
         <div class="upload-zone-icon">🌸</div>
-        <div class="upload-zone-text">Photos drag & drop பண்ணு<br>அல்லது click பண்ணி select பண்ணு<br><small style="color:rgba(255,179,198,0.4)">JPG, PNG, WEBP · Max 5MB each</small></div>
+        <div class="upload-zone-text">Photos drag & drop பண்ணு<br>அல்லது click பண்ணி select பண்ணு<br><small style="color:rgba(255,179,198,0.4)">JPG, PNG, WEBP · Max 20MB each</small></div>
         <div class="upload-zone-btn">Photos Choose பண்ணு 💕</div>
       </div>
-      <input type="file" id="memoriesFileInput" accept="image/*" multiple style="display:none" onchange="handleFilePick(event,'memories')"/>
+      <input type="file" id="memoriesFileInput" accept="image/*" multiple style="display:none" onchange="handleFilePick(event,'mem')"/>
       <div class="admin-upload-progress" id="memoriesProgress">
         <div class="admin-upload-progress-bar"><div class="admin-upload-progress-fill" id="memoriesProgressFill"></div></div>
         <div class="admin-upload-status" id="memoriesProgressStatus">Uploading...</div>
@@ -764,12 +764,12 @@ footer{
     <!-- GALLERY TAB -->
     <div id="adminGalleryTab" style="display:none">
       <div class="admin-section-title"><span>🖼️</span> Gallery Slider Photos</div>
-      <div class="upload-zone" id="galleryUploadZone" onclick="document.getElementById('galleryFileInput').click()" ondragover="adminDragOver(event,'galleryUploadZone')" ondragleave="adminDragLeave('galleryUploadZone')" ondrop="adminDrop(event,'gallery')">
+      <div class="upload-zone" id="galleryUploadZone" onclick="document.getElementById('galleryFileInput').click()" ondragover="adminDragOver(event,'galleryUploadZone')" ondragleave="adminDragLeave('galleryUploadZone')" ondrop="adminDrop(event,'gal')">
         <div class="upload-zone-icon">✨</div>
-        <div class="upload-zone-text">Gallery photos drag & drop பண்ணு<br>அல்லது click பண்ணி select பண்ணு<br><small style="color:rgba(255,179,198,0.4)">JPG, PNG, WEBP · Max 5MB each</small></div>
+        <div class="upload-zone-text">Gallery photos drag & drop பண்ணு<br>அல்லது click பண்ணி select பண்ணு<br><small style="color:rgba(255,179,198,0.4)">JPG, PNG, WEBP · Max 20MB each</small></div>
         <div class="upload-zone-btn">Photos Choose பண்ணு 💕</div>
       </div>
-      <input type="file" id="galleryFileInput" accept="image/*" multiple style="display:none" onchange="handleFilePick(event,'gallery')"/>
+      <input type="file" id="galleryFileInput" accept="image/*" multiple style="display:none" onchange="handleFilePick(event,'gal')"/>
       <div class="admin-upload-progress" id="galleryProgress">
         <div class="admin-upload-progress-bar"><div class="admin-upload-progress-fill" id="galleryProgressFill"></div></div>
         <div class="admin-upload-status" id="galleryProgressStatus">Uploading...</div>
@@ -1010,109 +1010,170 @@ function celebrate(){
 
 // ─── DB + ASSETS ───
 let dbHandle=null,assetsHandle=null;
+// live photo caches
+let photosCache={mem:[],gal:[]};
+// unsubscribe handles
+let unsubMem=null,unsubGal=null;
+
 async function initCloudStorage(){
   try{
     dbHandle=await claude.use('db');
-    assetsHandle=await claude.use('assets');
-    if(dbHandle){
-      // load memories
-      loadSectionPhotos('memories');
-      loadSectionPhotos('gallery');
-    }
-  }catch(e){console.warn('Cloud storage unavailable',e);}
-}
-
-async function loadSectionPhotos(section){
-  if(!dbHandle)return;
+  }catch(e){console.warn('db unavailable',e);}
   try{
-    const snap=await dbHandle.collection('photos_'+section).orderBy('createdAt','asc').get();
-    const photos=snap.docs.map(d=>({id:d.id,...d.data()}));
-    if(section==='memories')buildMemories(photos);
-    else buildGallery(photos);
-    refreshAdminGrid(section,photos);
-  }catch(e){console.warn('load photos error',e);}
+    assetsHandle=await claude.use('assets');
+  }catch(e){console.warn('assets unavailable',e);}
+
+  if(dbHandle){
+    // live subscribe — fires immediately with current data, then on every change
+    unsubMem=dbHandle.collection('pmem').orderBy('ts','asc').onSnapshot(snap=>{
+      const photos=snap.docs.filter(d=>d.exists).map(d=>({id:d.id,...d.data()}));
+      photosCache.mem=photos;
+      buildMemories(photos);
+      refreshAdminGrid('mem',photos);
+    }, e=>console.error('mem snap err',e));
+
+    unsubGal=dbHandle.collection('pgal').orderBy('ts','asc').onSnapshot(snap=>{
+      const photos=snap.docs.filter(d=>d.exists).map(d=>({id:d.id,...d.data()}));
+      photosCache.gal=photos;
+      buildGallery(photos);
+      refreshAdminGrid('gal',photos);
+    }, e=>console.error('gal snap err',e));
+  }
 }
 
 // ─── ADMIN PANEL ───
-let adminCurrentTab='memories';
+let adminCurrentTab='mem';
 function openAdmin(){document.getElementById('adminPanel').classList.add('open');}
 function closeAdmin(){document.getElementById('adminPanel').classList.remove('open');}
 function switchAdminTab(tab,btn){
   adminCurrentTab=tab;
   document.querySelectorAll('.admin-tab-btn').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
-  document.getElementById('adminMemoriesTab').style.display=tab==='memories'?'block':'none';
-  document.getElementById('adminGalleryTab').style.display=tab==='gallery'?'block':'none';
+  document.getElementById('adminMemoriesTab').style.display=tab==='mem'?'block':'none';
+  document.getElementById('adminGalleryTab').style.display=tab==='gal'?'block':'none';
 }
 function adminDragOver(e,zoneId){e.preventDefault();document.getElementById(zoneId).classList.add('dragover');}
 function adminDragLeave(zoneId){document.getElementById(zoneId).classList.remove('dragover');}
-function adminDrop(e,section){
+function adminDrop(e,tab){
   e.preventDefault();
-  const zoneId=section+'UploadZone';document.getElementById(zoneId).classList.remove('dragover');
+  const zoneId=(tab==='mem'?'memories':'gallery')+'UploadZone';
+  document.getElementById(zoneId).classList.remove('dragover');
   const files=Array.from(e.dataTransfer.files).filter(f=>f.type.startsWith('image/'));
-  if(files.length)uploadPhotos(files,section);
+  if(files.length)uploadPhotos(files,tab);
 }
-function handleFilePick(e,section){
+function handleFilePick(e,tab){
   const files=Array.from(e.target.files);
-  if(files.length)uploadPhotos(files,section);
+  if(files.length)uploadPhotos(files,tab);
   e.target.value='';
 }
-async function uploadPhotos(files,section){
-  if(!assetsHandle||!dbHandle){alert('Storage initialize ஆகல — ஒரு நிமிஷம் wait பண்ணி try பண்ணு 💕');return;}
-  const progWrap=document.getElementById(section+'Progress');
-  const progFill=document.getElementById(section+'ProgressFill');
-  const progStatus=document.getElementById(section+'ProgressStatus');
-  progWrap.style.display='block';
-  for(let i=0;i<files.length;i++){
-    const f=files[i];
-    if(f.size>5*1024*1024){progStatus.textContent=`${f.name} — 5MB-க்கு மேல இருக்கு, skip பண்றோம்`;continue;}
-    progStatus.textContent=`Uploading ${i+1}/${files.length}: ${f.name}…`;
-    progFill.style.width=Math.round((i/files.length)*100)+'%';
-    try{
-      const asset=await assetsHandle.upload(f);
-      const docId='photo_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
-      await dbHandle.collection('photos_'+section).doc(docId).set({
-        assetId:asset.id,caption:'',createdAt:Date.now(),name:f.name
-      });
-    }catch(e){console.error('upload error',e);progStatus.textContent='Upload failed — try again 💔';}
+
+async function uploadPhotos(files,tab){
+  const progId=tab==='mem'?'memories':'gallery';
+  const progWrap=document.getElementById(progId+'Progress');
+  const progFill=document.getElementById(progId+'ProgressFill');
+  const progStatus=document.getElementById(progId+'ProgressStatus');
+
+  if(!assetsHandle||!dbHandle){
+    progWrap.style.display='block';
+    progStatus.textContent='❌ Storage இல்ல — page reload பண்ணி try பண்ணு';
+    return;
   }
+
+  progWrap.style.display='block';
+  progFill.style.width='0%';
+  let done=0;
+
+  for(const f of files){
+    if(f.size>20*1024*1024){
+      progStatus.textContent=`⚠️ ${f.name} too large, skip`;
+      continue;
+    }
+    progStatus.textContent=`Uploading ${done+1}/${files.length}: ${f.name}…`;
+
+    try{
+      // determine content type
+      let ct=f.type;
+      if(!ct||ct==='application/octet-stream'){
+        const ext=f.name.split('.').pop().toLowerCase();
+        const map={jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',gif:'image/gif',webp:'image/webp'};
+        ct=map[ext]||'image/jpeg';
+      }
+      const asset=await assetsHandle.upload(f,{type:ct});
+      const col=tab==='mem'?'pmem':'pgal';
+      await dbHandle.collection(col).add({
+        assetId:asset.id,
+        caption:'',
+        ts:Date.now(),
+        name:f.name
+      });
+      done++;
+      progFill.style.width=Math.round((done/files.length)*100)+'%';
+    }catch(err){
+      console.error('upload err',err);
+      progStatus.textContent=`❌ ${f.name} upload failed: ${err.code||err.message}`;
+      await new Promise(r=>setTimeout(r,1500));
+    }
+  }
+
   progFill.style.width='100%';
-  progStatus.textContent='✅ Done! Photos added 💕';
-  setTimeout(()=>{progWrap.style.display='none';progFill.style.width='0%';},2000);
-  loadSectionPhotos(section);
+  progStatus.textContent=done>0?`✅ ${done} photo${done>1?'s':''} added! 💕`:'⚠️ No photos uploaded';
+  setTimeout(()=>{progWrap.style.display='none';progFill.style.width='0%';},2500);
+  // onSnapshot fires automatically — no manual reload needed
 }
-function refreshAdminGrid(section,photos){
-  const grid=document.getElementById('admin'+section.charAt(0).toUpperCase()+section.slice(1)+'Grid');
+
+function refreshAdminGrid(tab,photos){
+  const gridId='admin'+(tab==='mem'?'Memories':'Gallery')+'Grid';
+  const grid=document.getElementById(gridId);
   if(!grid)return;
   grid.innerHTML='';
-  if(!photos||!photos.length){grid.innerHTML='<div class="admin-empty">இன்னும் photos இல்ல 💕</div>';return;}
+  if(!photos||!photos.length){
+    grid.innerHTML='<div class="admin-empty" style="grid-column:1/-1">இன்னும் photos இல்ல 💕</div>';
+    return;
+  }
   photos.forEach(p=>{
-    const item=document.createElement('div');item.className='admin-photo-item';
-    item.innerHTML=`<img src="/_blob/${p.assetId}" alt="photo"/>
-    <div class="admin-photo-overlay">
-      <input class="admin-caption-input" value="${p.caption||''}" placeholder="Caption…" id="cap_${p.id}"/>
-      <button class="admin-save-caption" onclick="saveCaption('${section}','${p.id}')">Save ✓</button>
-      <button class="admin-del-btn" onclick="deletePhoto('${section}','${p.id}','${p.assetId}')">Delete 🗑</button>
-    </div>`;
+    const item=document.createElement('div');
+    item.className='admin-photo-item';
+    const safeCaption=(p.caption||'').replace(/"/g,'&quot;');
+    item.innerHTML=`
+      <img src="/_blob/${p.assetId}" alt="photo" onerror="this.style.display='none'"/>
+      <div class="admin-photo-overlay">
+        <input class="admin-caption-input" value="${safeCaption}" placeholder="Caption…" id="cap_${p.id}"/>
+        <button class="admin-save-caption" onclick="saveCaption('${tab}','${p.id}','${p.assetId}')">Save ✓</button>
+        <button class="admin-del-btn" onclick="deletePhoto('${tab}','${p.id}','${p.assetId}')">🗑 Delete</button>
+      </div>`;
     grid.appendChild(item);
   });
 }
-async function saveCaption(section,docId){
+
+async function saveCaption(tab,docId,assetId){
   if(!dbHandle)return;
-  const val=document.getElementById('cap_'+docId).value;
+  const inp=document.getElementById('cap_'+docId);
+  if(!inp)return;
+  const val=inp.value;
+  const col=tab==='mem'?'pmem':'pgal';
   try{
-    await dbHandle.collection('photos_'+section).doc(docId).update({caption:val});
-    loadSectionPhotos(section);
-  }catch(e){console.error(e);}
+    await dbHandle.collection(col).doc(docId).update({caption:val});
+    // onSnapshot will refresh UI automatically
+  }catch(e){
+    console.error('save caption err',e);
+    alert('Save failed: '+( e.code||e.message));
+  }
 }
-async function deletePhoto(section,docId,assetId){
+
+async function deletePhoto(tab,docId,assetId){
   if(!dbHandle)return;
   if(!confirm('இந்த photo delete பண்ணட்டுமா? 💔'))return;
+  const col=tab==='mem'?'pmem':'pgal';
   try{
-    await dbHandle.collection('photos_'+section).doc(docId).delete();
-    if(assetsHandle)await assetsHandle.delete(assetId);
-    loadSectionPhotos(section);
-  }catch(e){console.error(e);}
+    await dbHandle.collection(col).doc(docId).delete();
+    if(assetsHandle){
+      try{await assetsHandle.delete(assetId);}catch(e){console.warn('asset del',e);}
+    }
+    // onSnapshot fires and refreshes UI
+  }catch(e){
+    console.error('delete err',e);
+    alert('Delete failed: '+(e.code||e.message));
+  }
 }
 
 // ─── INIT MAIN ───
